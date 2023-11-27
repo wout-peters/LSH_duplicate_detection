@@ -24,13 +24,15 @@ def create_df(data):
 
 def normalize_text(titles):
     '''
-    String normalisation: all lower case, change " to inch, remove punctuations
+    String normalisation: all lower case, inch and hertz expressions, remove punctuations
     '''
     normalized_titles = []
     
     for row in titles:
         row = row.lower()
         row = row.replace('"','inch')
+        row = row.replace('inches','inch')
+        row = row.replace('hertz','hz')
 
         #remove punctuations
         row = row.replace('.','')
@@ -72,22 +74,45 @@ def product_representation(titles,TV_brands):
     
     return representations
 
+def binary_matrix(product_representations):
+    '''
+    Create binary matrix for product representations
+    Entries are binary vectors for each TV with 1 if token present, 0 else
+    Returns binary numpy matrix and the list of tokens in correct order
+    '''
+    #use unique tokens
+    flat_list = [item for sublist in product_representations for item in sublist]
+    tokens = list(set(flat_list))
+    
+    #rows are elements of token set, columns are TVs
+    binary_matrix = np.zeros((len(tokens),len(product_representations)), dtype=int)
+    for tv in range(len(product_representations)):
+        for token in range(len(tokens)):
+            if tokens[token] in product_representations[tv]:
+                binary_matrix[token][tv] = 1
+
+    return binary_matrix, tokens
 
 def main():
+    print("Loading data...")
     with open("D:/Studie/23-24/Blok 2/Computer Science/Personal Assignment/TVs-all-merged (1)/TVs-all-merged.json", 'r') as read_file:
         data = json.load(read_file)
     read_file.close()
-
     df = create_df(data)
 
+    print("Creating product representations...")
     #normalize titles
     df['title'] = normalize_text(df['title'])
 
     #for now, use manual list of TV brands. In the future, make webscraper.
-    TV_brands = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo"]
-    TV_brands = normalize_text(TV_brands)
+    TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
+    TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
+    TV_brands = normalize_text(list(set(TV_brands_1) | set(TV_brands_2)))
+    product_representations = product_representation(df['title'],TV_brands)
 
-    print(product_representation(df['title'],TV_brands))
+    print("Creating binary matrix")
+    bin_matrix, tokens = binary_matrix(product_representations)
+
     
 
 if __name__ == "__main__":
