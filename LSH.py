@@ -93,25 +93,83 @@ def binary_matrix(product_representations):
 
     return binary_matrix, tokens
 
+def find_next_prime(number):
+    def is_prime(num):
+        if num < 2:
+            return False
+        for i in range(2, int(num**0.5) + 1):
+            if num % i == 0:
+                return False
+        return True
+    next_number = number + 1
+    while not is_prime(next_number):
+        next_number += 1
+    return next_number    
+        
+def randomCoefficients(numHashes):
+    randList = []
+    for i in range(numHashes):
+        randIndex = random.randint(0,numHashes)
+        while randIndex in randList:
+            randIndex = random.randint(0,numHashes)
+        randList.append(randIndex)
+    return randList
+
+def minhash(numHashFunc, binary_matrix):
+    '''
+    Performs min-hashing using the implementation in the lecture
+    The hash functions are of the form ax + b % P, where x is the input,
+    a and b random coefficients, and P is the first prime number larger than
+    the number of tokens
+    '''
+    P = find_next_prime(binary_matrix.shape[0])
+    a = randomCoefficients(numHashFunc)
+    b = randomCoefficients(numHashFunc)
+    hashFunc = lambda a,b,P,x: (a * x + b) % P
+    hash = np.zeros(numHashFunc)
+    #signature matrix has same number of columns (#TVs), less rows
+    M = np.full((numHashFunc,binary_matrix.shape[1]), np.inf)
+
+    #iterate over ROWS of TVs
+    for row_idx, row in enumerate(binary_matrix):
+        for i in range(numHashFunc):
+            hash[i] = hashFunc(a[i],b[i],P,row_idx)
+        for col_idx, col in enumerate(binary_matrix.T):
+            if col[row_idx] == 1:
+                for val in hash:
+                    if val < M[i,col_idx]:
+                        M[i,col_idx] = val
+    
+    return M
+
+
+
 def main():
     print("Loading data...")
+    
     with open("D:/Studie/23-24/Blok 2/Computer Science/Personal Assignment/TVs-all-merged (1)/TVs-all-merged.json", 'r') as read_file:
         data = json.load(read_file)
     read_file.close()
     df = create_df(data)
 
     print("Creating product representations...")
-    #normalize titles
+    
     df['title'] = normalize_text(df['title'])
-
     #for now, use manual list of TV brands. In the future, make webscraper.
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
     TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
     TV_brands = normalize_text(list(set(TV_brands_1) | set(TV_brands_2)))
     product_representations = product_representation(df['title'],TV_brands)
 
-    print("Creating binary matrix")
+    print("Creating binary matrix...")
+
     bin_matrix, tokens = binary_matrix(product_representations)
+
+    print("Min-hashing...")
+
+    signatures = minhash(3,bin_matrix)
+
+    print(signatures)
 
     
 
