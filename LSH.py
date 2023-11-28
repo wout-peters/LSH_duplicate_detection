@@ -287,6 +287,7 @@ def main():
     
     print("Creating product representations...")
     
+    #Product representations are model words in the title, model words in the values, and brands in the titles
     df['title'] = normalize_list(df['title'])
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
     TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
@@ -295,19 +296,21 @@ def main():
 
     product_representations = product_representation(df['title'],TV_brands,df['features'])
 
-    print(product_representations)
-#
-    #print("Creating binary matrix...")
-#
-    #bin_matrix, tokens = binary_matrix(product_representations)
-#
-    #print("Min-hashing...")
-#
-    #signatures = minhash(100,bin_matrix)
-#
-    #print("LSH...")
-#
-    #candidate_pairs = LSH(signatures, 0.8)
+    #print(product_representations)
+
+    print("Creating binary matrix...")
+
+    bin_matrix, tokens = binary_matrix(product_representations)
+    
+    print("Min-hashing...")
+
+    signatures = minhash(100,bin_matrix)
+
+    print("LSH...")
+
+    candidate_pairs = LSH(signatures, 0.8)
+
+    print(candidate_pairs)
     
 
 if __name__ == "__main__":
