@@ -8,6 +8,8 @@ import random
 from collections import defaultdict
 import itertools
 
+from sklearn.metrics import jaccard_score
+
 def create_df(data):
     '''
     Creates a pandas dataframe from JSON input with high-level info
@@ -146,105 +148,104 @@ def minhash(numHashFunc, binary_matrix):
     
     return M
 
-def initialize_array_bucket(bands, nBuckets):
+def initialize_hash_bucket(bands, nBuckets):
     '''
     Initializes the hash matrix, with nBuckets empty lists for each band
     '''
-    array_buckets = []
+    hash_buckets = []
     for band in range(bands):
-        array_buckets.append([[] for i in range(nBuckets)])
-    return array_buckets
+        hash_buckets.append([[] for i in range(nBuckets)])
+    return hash_buckets
 
-#def apply_LSH_technique(SIG = np.matrix(signatures).transpose() , t = threshold, bands=bands, rows=rows):
-#        array_buckets = initialize_array_bucket(bands)
-#        candidates = {}
-#        i = 0
-#        for b in range(bands):
-#            buckets = array_buckets[b]        
-#            band = SIG[i:i+rows,:]
-#            for col in range(band.shape[1]):
-#                key = int(sum(band[:,col]) % len(buckets))
-#                buckets[key].append(col)
-#            i = i+rows
-#        
-#            for item in buckets:
-#                if len(item) > 1:
-#                    pair = (item[0], item[1])
-#                    if pair not in candidates:
-#                        A = SIG[:,item[0]]
-#                        B = SIG[:,item[1]]
-#                        similarity = jaccard_score(A,B, average='macro')
-#                        if similarity >= t:
-#                            candidates[pair] = similarity
-#    
-#        sort = sorted(candidates.items(), reverse=True)
-#        return candidates,sort
+def get_b(numSig, threshold):
+        """
+        Approximates the bandwidth (number of rows in each band)
+        needed to get threshold.
+        Threshold t = (1/b) ** (1/r) where
+        b = #bands
+        r = #rows per band
+        n = b * r = #elements in signature
+        """
+        n = numSig
+        t = threshold
+        def get_bandwidth(n, t):
+            best = n, 1
+            minerr  = float("inf")
+            for r in range(1, n + 1):
+                try:
+                    b = 1. / (t ** r)
+                except:             # Divide by zero, your signature is huge
+                    return best
+                err = abs(n - (b * r))
+                if err < minerr:
+                    best = r
+                    minerr = err
+            return best
+        r = get_bandwidth(n, t)
+        b = int(n / r)
+        return b
 
-def LSH(signature_matrix, thres, nBands):
+def LSH(signature_matrix, thres):
     '''
     Perform LSH on the signature matrix, with number of bands b,
     rows per band r, and threshold t.
     '''
-    # NUMBER OF BUCKETS DEFINED CORRECTLY?
-    nBuckets = find_next_prime(signature_matrix.shape[0])
-    array_buckets = initialize_array_bucket(nBands, nBuckets)
+    # Take nBuckets very large such that columns only hashed to same bucket when identical
+    nBuckets = find_next_prime(100*signature_matrix.shape[0])
+    nBands = get_b(signature_matrix.shape[0],thres)
+    print("number of Bands:")
+    print(nBands)
+    hash_buckets = initialize_hash_bucket(nBands, nBuckets)
     numHashFunc, numTV = signature_matrix.shape
-    candidates = {}
+    candidates = set()
     rowsPerBand = math.floor(numHashFunc/nBands)
     rowsLeft = numHashFunc % nBands
 
-    # CHECK IF THIS IS OKAY FOR THE LAST BAND
     for b in range(nBands):
-        band = signature_matrix[b*rowsPerBand:(b+1)*rowsPerBand,:]
+        #put rest of the rows in the final band
+        if b == nBands - 1:
+            band = signature_matrix[b*rowsPerBand:(b+1)*rowsPerBand + rowsLeft,:]
+            # As hash function, take a random linear transformation of the signatures and take modulo of nBuckets
+            hash_function = np.random.randint(1, numHashFunc, size = rowsPerBand + rowsLeft)
+        else:
+            band = signature_matrix[b*rowsPerBand:(b+1)*rowsPerBand,:]
+            hash_function = np.random.randint(1, numHashFunc, size = rowsPerBand)
         for col in range(numTV):
-            key = int(sum(band[:,col]) % nBuckets)
-            array_buckets[b][key].append(col)
+            key = int(hash_function.dot(band[:,col]) % nBuckets)
+            hash_buckets[b][key].append(col)
 
-    # TO DO: DIFFERENT HASH FUNCTIONS
-    # It generates two hash functions (b)!!, two vectors of size numHashFunc that will be multiplied with
-    # the signature matrix
-    # Generate random hash functions
-    hash_functions = [np.random.randint(1, 1000, size=numHashFunc) for _ in range(b)]
-
-    # Initialize hash tables
-    # Creates two empty dictionaries
-    hash_tables = [defaultdict(list) for _ in range(b)]
-
-    # Hash signatures into buckets
-    for col_idx in range(numTV):
-        for i, hash_function in enumerate(hash_functions):
-            hash_value = hash_function.dot(signature_matrix[:, col_idx]) % b
-            hash_tables[i][hash_value].append(col_idx)
-
-    # Identify candidate pairs from hash tables
-    candidate_pairs = set()
-    for table in hash_tables:
-        for bucket, columns in table.items():
-            if len(columns) > 1:
-                for pair in itertools.combinations(columns, 2):
-                    # Check similarity using the Jaccard similarity
-                    similarity = np.sum(signature_matrix[:, pair[0]] == signature_matrix[:, pair[1]]) / numHashFunc
-                    if similarity >= t:
-                        candidate_pairs.add(pair)
-
-    return list(candidate_pairs)
+        #for band b, check each bucket for duplicates
+        for bucket in hash_buckets[b]:
+            if len(bucket) > 1:
+                for pair in itertools.combinations(bucket, 2):
+                    if pair not in candidates:
+                        A = signature_matrix[:,pair[0]]
+                        B = signature_matrix[:,pair[1]]
+                        similarity = jaccard_score(A,B,average='macro')
+                        #if similarity > thres for at least one band, add to candidates  
+                        if similarity >= thres:
+                            candidates.add(pair)
+        print("current band")
+        print(b)              
+    
+    return candidates        
 
 
 def main():
-    #print("Loading data...")
-    #
-    #with open("D:/Studie/23-24/Blok 2/Computer Science/Personal Assignment/TVs-all-merged (1)/TVs-all-merged.json", 'r') as read_file:
-    #    data = json.load(read_file)
-    #read_file.close()
-    #df = create_df(data)
+    print("Loading data...")
+    
+    with open("D:/Studie/23-24/Blok 2/Computer Science/Personal Assignment/TVs-all-merged (1)/TVs-all-merged.json", 'r') as read_file:
+        data = json.load(read_file)
+    read_file.close()
+    df = create_df(data)
 
     #toy data
     
-    TV1 = "philips 1080p 530hz 30inch"
-    #TV1 = "samsung 4k 100hz 1080p"
-    TV2 = "samsung 4k 100hz 50inch"
-    data = {'title': [TV1,TV2]}
-    df = pd.DataFrame(data)
+    #TV1 = "philips 1080p 530hz 30inch"
+    #TV1 = "samsung 4k 100hz 50inch 1080p 30inch 530hz philips"
+    #TV2 = "samsung 4k 100hz 50inch 1080p 30inch 530hz"
+    #data = {'title': [TV1,TV2]}
+    #df = pd.DataFrame(data)
     
     print("Creating product representations...")
     
@@ -261,11 +262,12 @@ def main():
 
     print("Min-hashing...")
 
-    signatures = minhash(9,bin_matrix)
+    signatures = minhash(100,bin_matrix)
 
     print("LSH...")
 
-    LSH(signatures, 0.8, 2)
+    candidate_pairs = LSH(signatures, 0.8)
+    print(candidate_pairs)
 
 
     
