@@ -126,19 +126,19 @@ def minhash(numHashFunc, binary_matrix):
     a = randomCoefficients(numHashFunc)
     b = randomCoefficients(numHashFunc)
     hashFunc = lambda a,b,P,x: (a * x + b) % P
-    hash = np.zeros(numHashFunc)
+    hash_values = np.zeros(numHashFunc)
     #signature matrix has same number of columns (#TVs), less rows
     M = np.full((numHashFunc,binary_matrix.shape[1]), np.inf)
 
     #iterate over ROWS of TVs
     for row_idx, row in enumerate(binary_matrix):
-        for i in range(numHashFunc):
-            hash[i] = hashFunc(a[i],b[i],P,row_idx)
+        for hash_idx in range(numHashFunc):
+            hash_values[hash_idx] = hashFunc(a[hash_idx],b[hash_idx],P,row_idx)
         for col_idx, col in enumerate(binary_matrix.T):
             if col[row_idx] == 1:
-                for val in hash:
-                    if val < M[i,col_idx]:
-                        M[i,col_idx] = val
+                for idx in range(numHashFunc):
+                    if hash_values[idx] < M[idx,col_idx]:
+                        M[idx,col_idx] = hash_values[idx]
     
     return M
 
@@ -152,6 +152,14 @@ def main():
     read_file.close()
     df = create_df(data)
 
+    #toy data
+    
+    #TV1 = "philips 1080p 530hz 30inch"
+    #TV1 = "samsung 4k 100hz 1080p"
+    #TV2 = "samsung 4k 100hz 50inch"
+    #data = {'title': [TV1,TV2]}
+    #df = pd.DataFrame(data)
+    
     print("Creating product representations...")
     
     df['title'] = normalize_text(df['title'])
@@ -167,8 +175,9 @@ def main():
 
     print("Min-hashing...")
 
-    signatures = minhash(3,bin_matrix)
+    signatures = minhash(4,bin_matrix)
 
+    #debugging
     print(signatures)
 
     
