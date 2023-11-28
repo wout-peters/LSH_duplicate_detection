@@ -26,13 +26,13 @@ def create_df(data):
             df.loc[len(df.index)] = row
     return df
 
-def normalize_text(titles):
+def normalize_list(textList):
     '''
     String normalisation: all lower case, inch and hertz expressions, remove punctuations
     '''
     normalized_titles = []
     
-    for row in titles:
+    for row in textList:
         row = row.lower()
         row = row.replace('"','inch')
         row = row.replace('inches','inch')
@@ -48,10 +48,45 @@ def normalize_text(titles):
         row = row.replace(':','')
         row = row.replace('/','')
         row = row.replace(',','')
+        row = row.replace('°','')
+        row = row.replace('º','')
+        row = row.replace('>','')
+        row = row.replace('<','')
 
         normalized_titles.append(row)
 
     return normalized_titles
+
+def normalize_dictionary(textDict):
+    '''
+    String normalisation: all lower case, inch and hertz expressions, remove punctuations
+    '''
+    normalized_dict = {}
+
+    for key,val in textDict.items():
+        val = val.lower()
+        val = val.replace('"','inch')
+        val = val.replace('inches','inch')
+        val = val.replace('hertz','hz')
+
+        #remove punctuations
+        val = val.replace('.','')
+        val = val.replace('-','')
+        val = val.replace('(','')
+        val = val.replace(')','')
+        val = val.replace('[','')
+        val = val.replace(']','')
+        val = val.replace(':','')
+        val = val.replace('/','')
+        val = val.replace(',','')
+        val = val.replace('°','')
+        val = val.replace('º','')
+        val = val.replace('>','')
+        val = val.replace('<','')
+
+        normalized_dict[key] = val
+    
+    return normalized_dict
 
 def is_model_word(input_string):
     has_letters = any(char.isalpha() for char in input_string)
@@ -59,22 +94,27 @@ def is_model_word(input_string):
 
     return has_letters and has_numbers
 
-def product_representation(titles,TV_brands):
+def product_representation(titles,TV_brands,features):
     '''
     Creates a list of product representations
-    Includes model words from the titles, and TV brand names in the title
+    Includes model words from the titles, and TV brand names in the title, and model words in the values
     '''
     representations = []
 
-    for row in titles:
-        tv_rep = []
-        wordList = row.split()
-        for string in wordList:
+    for TV in range(len(titles)):
+        TV_rep = []
+        title_list = titles[TV].split()
+        for string in title_list:
             if is_model_word(string):
-                tv_rep.append(string)
+                TV_rep.append(string)
             if string in TV_brands:
-                tv_rep.append(string)
-        representations.append(tv_rep)
+                TV_rep.append(string)
+        for key,val in features[TV].items():
+            val_list = val.split()
+            for word in val_list:
+                if is_model_word(word):
+                    TV_rep.append(word)        
+        representations.append(TV_rep)
     
     return representations
 
@@ -159,12 +199,8 @@ def initialize_hash_bucket(bands, nBuckets):
 
 def get_b(numSig, threshold):
         """
-        Approximates the bandwidth (number of rows in each band)
-        needed to get threshold.
-        Threshold t = (1/b) ** (1/r) where
-        b = #bands
-        r = #rows per band
-        n = b * r = #elements in signature
+        Calculates the number of bands needed such that approximately it holds that
+        (1/b)^(1/r) = threshold and b*r = numSig
         """
         n = numSig
         t = threshold
@@ -193,8 +229,6 @@ def LSH(signature_matrix, thres):
     # Take nBuckets very large such that columns only hashed to same bucket when identical
     nBuckets = find_next_prime(100*signature_matrix.shape[0])
     nBands = get_b(signature_matrix.shape[0],thres)
-    print("number of Bands:")
-    print(nBands)
     hash_buckets = initialize_hash_bucket(nBands, nBuckets)
     numHashFunc, numTV = signature_matrix.shape
     candidates = set()
@@ -222,14 +256,18 @@ def LSH(signature_matrix, thres):
                         A = signature_matrix[:,pair[0]]
                         B = signature_matrix[:,pair[1]]
                         similarity = jaccard_score(A,B,average='macro')
-                        #if similarity > thres for at least one band, add to candidates  
+                        #if similarity > thres, add to candidates  
                         if similarity >= thres:
-                            candidates.add(pair)
-        print("current band")
-        print(b)              
+                            candidates.add(pair)            
     
-    return candidates        
+    return list(candidates)        
 
+#def similarity(candidate_pairs, bin_matrix):
+#    for pair in candidate_pairs:
+#        TV_1 = bin_matrix[:,pair[0]]
+#        TV_2 = bin_matrix[:,pair[1]]
+#        similarity = np.linalg.norm(TV_1-TV_2)
+#        print(similarity)
 
 def main():
     print("Loading data...")
@@ -249,27 +287,27 @@ def main():
     
     print("Creating product representations...")
     
-    df['title'] = normalize_text(df['title'])
-    #for now, use manual list of TV brands. In the future, make webscraper.
+    df['title'] = normalize_list(df['title'])
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
     TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
-    TV_brands = normalize_text(list(set(TV_brands_1) | set(TV_brands_2)))
-    product_representations = product_representation(df['title'],TV_brands)
+    TV_brands = normalize_list(list(set(TV_brands_1) | set(TV_brands_2)))
+    df['features'] = df['features'].apply(lambda x: normalize_dictionary(x))
 
-    print("Creating binary matrix...")
+    product_representations = product_representation(df['title'],TV_brands,df['features'])
 
-    bin_matrix, tokens = binary_matrix(product_representations)
-
-    print("Min-hashing...")
-
-    signatures = minhash(100,bin_matrix)
-
-    print("LSH...")
-
-    candidate_pairs = LSH(signatures, 0.8)
-    print(candidate_pairs)
-
-
+    print(product_representations)
+#
+    #print("Creating binary matrix...")
+#
+    #bin_matrix, tokens = binary_matrix(product_representations)
+#
+    #print("Min-hashing...")
+#
+    #signatures = minhash(100,bin_matrix)
+#
+    #print("LSH...")
+#
+    #candidate_pairs = LSH(signatures, 0.8)
     
 
 if __name__ == "__main__":
