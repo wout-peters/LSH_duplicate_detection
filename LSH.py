@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import random
 from collections import defaultdict
+from collections import Counter
+import re
 import itertools
-
 from sklearn.metrics import jaccard_score
 
 def create_df(data):
@@ -276,7 +277,6 @@ def get_model_df(df,candidate_pairs,signature):
 
     return candidate_df
 
-
 def LSH_evaluation(lsh_candidates, df):
     true_duplicates = all_pairs(df) 
     lsh_candidates = [set(tuple_a) for tuple_a in lsh_candidates]
@@ -293,14 +293,14 @@ def LSH_evaluation(lsh_candidates, df):
 
     PQ = true_duplicates_found / number_comparisons
     PC = true_duplicates_found / true_num_duplicates
-    F1 = (2*PQ*PC) / (PQ + PC)
+    F1_star = (2*PQ*PC) / (PQ + PC)
 
     print("Amount of comparisons: ", number_comparisons)
     print("Amount of true duplicates: ",true_num_duplicates)
     print("Amount of true duplicates found: ",true_duplicates_found)
     print('Pair Quality (PQ): ', PQ)
     print('Pair Completeness (PC): ', PC)
-    print('The F1 score is: ', F1)
+    print('The F1_star score is: ', F1_star)
 
     return
 
@@ -330,6 +330,64 @@ def all_pairs(df):
     result = [indices for indices in indices_dict.values() if len(indices) > 1]
     return result
     
+def get_modelID(df):
+    # Unique modelID finder
+    # Returns 2 lists with potential modelIDs by extracting words from title and checking how often they occur.
+    # First list are values that occur once (bigger probability to contain noise)
+    # Second list contains values that occur 2,3,4,5 times (quite low noise)
+
+    # Add all titles togheter and split the title list into words
+    modelID_set = set()
+    for i in range(len(df['title'])):
+        title_split = df['title'][i].split()
+        title_split_unique = set(title_split)             # in case modelID occurs 2 times in title
+
+        # First time filter
+        def filter_words(word_list):
+            filtered_words = [word for word in word_list if not (word.isalpha() or word.isdigit() or 'inch' in word
+                              or 'hz' in word or '3d ' in word or '+' in word or '”' in word or "'" in word or "1080p" in word
+                              or '720p' in word or '4k' in word or '2160p' in word or 'cdm2' in word or '2k' in word
+                              or 'dynex' in word or "0cmr" in word or '480i' in word or '3dready' in word)]
+            return filtered_words
+
+        extracted_modelID = filter_words(title_split_unique)
+        pattern = re.compile(r'\b(\w+)\b')
+        extracted_words = [match.group(1) for item in extracted_modelID for match in re.finditer(pattern, item)]
+        single_string = ' '.join(extracted_words)
+
+        # Regular expression to match standalone "3d"
+        pattern = re.compile(r'\b3d\b')
+
+        # Remove standalone "3d"
+        result_string = re.sub(r'\b3d\b', '', single_string).strip()
+
+        if len(result_string) >= 1 :
+            modelID_set.add(result_string)
+        else:
+            modelID_set.add(f'{i}')
+
+    return {entry for entry in modelID_set if not entry.isnumeric()}
+    
+def get_title_modelID_pairs(modelID_list, df):
+    modelID_indices = {}
+    for index, row in df.iterrows():
+        for word in row['title'].split():
+            if word in modelID_list:
+                if word in modelID_indices:
+                    modelID_indices[word].append(index)
+                else:
+                    modelID_indices[word] = [index]
+    modelID_indices = {model_id: indices for model_id, indices in modelID_indices.items() if len(indices) <= 4}
+
+    title_modelID_pairs = []
+    for modelID, indices in modelID_indices.items():
+        if len(indices) > 1:
+            for pair in itertools.combinations(indices, 2):
+                if pair not in title_modelID_pairs:
+                    title_modelID_pairs.append(pair)
+
+    return title_modelID_pairs
+
 def main():
     print("Loading data...")
     
@@ -337,14 +395,6 @@ def main():
         data = json.load(read_file)
     read_file.close()
     df = create_df(data)
-
-    #toy data
-    
-    #TV1 = "philips 1080p 530hz 30inch"
-    #TV1 = "samsung 4k 100hz 50inch 1080p 30inch 530hz philips"
-    #TV2 = "samsung 4k 100hz 50inch 1080p 30inch 530hz"
-    #data = {'title': [TV1,TV2]}
-    #df = pd.DataFrame(data)
     
     print("Creating product representations...")
     
@@ -365,12 +415,18 @@ def main():
     
     print("LSH...")
 
-    candidate_pairs = LSH(signatures, 0.9)
+    LSH_candidate_pairs = LSH(signatures, 0.9)
+
+    print("Adding title model ID candidate pairs...")
+
+    title_modelIDs = get_modelID(df)
+    modelID_pairs = get_title_modelID_pairs(title_modelIDs,df)
+
+    candidate_pairs = list(set(LSH_candidate_pairs) | set(modelID_pairs))
 
     print("LSH evaluation:")
 
     LSH_evaluation(candidate_pairs,df)
     
-
 if __name__ == "__main__":
     main()
