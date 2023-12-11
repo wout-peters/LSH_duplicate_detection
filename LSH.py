@@ -7,6 +7,7 @@ import pandas as pd
 import random
 from collections import defaultdict
 from collections import Counter
+import string
 import re
 import itertools
 from sklearn.metrics import jaccard_score
@@ -258,26 +259,7 @@ def LSH(signature_matrix, thres):
     
     return list(candidates)        
 
-def get_model_df(df,candidate_pairs,signature):
-    '''
-    Constructs dataframe used for training/testing duplicate detection method.
-    Duplicate detection method is trained on LSH output of train set.
-    Missing: multiple similarity measures
-    '''
-    candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'signature_similarity'])
-
-    for i in range(len(candidate_pairs[0])):
-        A = signature[:,int(candidate_pairs[0][i][0])]
-        B = signature[:,int(candidate_pairs[0][i][1])]
-        similarity = jaccard_score(A,B,average='macro')
-        if df['modelID'][candidate_pairs[0][i][0]] == df['modelID'][candidate_pairs[0][i][1]]:
-            candidate_df.loc[i] = [int(1), int(candidate_pairs[0][i][0]), int(candidate_pairs[0][i][1]), similarity]
-        else:
-            candidate_df.loc[i] = [int(0), int(candidate_pairs[0][i][0]), int(candidate_pairs[0][i][1]), similarity]
-
-    return candidate_df
-
-def LSH_evaluation(lsh_candidates, df):
+def candidate_evaluation(lsh_candidates, df):
     true_duplicates = all_pairs(df) 
     lsh_candidates = [set(tuple_a) for tuple_a in lsh_candidates]
     result = [tuple_a for tuple_a in lsh_candidates if any(set(tuple_a).issubset(set_b) for set_b in true_duplicates)]
@@ -388,6 +370,112 @@ def get_title_modelID_pairs(modelID_list, df):
 
     return title_modelID_pairs
 
+def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
+    '''
+    Constructs dataframe used for training/testing duplicate detection method.
+    Duplicate detection method is trained on LSH output of train set.
+    Missing: multiple similarity measures
+    '''
+    candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'same_shop', 'same_brand' 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity'])
+
+    for i in range(len(candidate_pairs[0])):
+        # Indices
+        idx1 = int(candidate_pairs[i][0])
+        idx2 = int(candidate_pairs[i][1])
+        candidate_df.loc[i, 'idx_tv1'] = idx1
+        candidate_df.loc[i, 'idx_tv2'] = idx2   
+        
+        # Signature similarity
+        A = signature[:,idx1]
+        B = signature[:,idx2]
+        similarity = jaccard_score(A,B,average='macro')
+        candidate_df.loc[i, 'signature_similarity'] = similarity
+
+        # True duplicate
+        if df['modelID'][idx1] == df['modelID'][idx2]:
+            candidate_df.loc[i, 'duplicate'] = 1
+        else:
+            candidate_df.loc[i, 'duplicate'] = 0
+        
+        # Check if model ID pairs
+        if (idx1,idx2) in modelID_pairs:
+            candidate_df.loc[i, 'modelID_pair'] = 1
+        else:
+            candidate_df.loc[i, 'modelID_pair'] = 0
+
+        # Same store
+        if df['shop'][idx1] == df['shop'][idx2]:
+            candidate_df.loc[i, 'same_shop'] = 1
+        else:
+            candidate_df.loc[i, 'same_shop'] = 0
+
+        # Same brand
+        brand1 = ''
+        brand2 = ''
+        for word1 in df['title'][idx1].split():
+            if word1 in TV_brands:
+                brand1 = word1
+        for word2 in df['title'][idx2].split():
+            if word2 in TV_brands:
+                brand2 = word2
+        if brand1 == brand2:
+            candidate_df.loc[i, 'same_brand'] = 1
+        else:
+            candidate_df.loc[i, 'same_brand'] = 0
+
+        # 3-gram title similarity
+        titA = ''.join(word for word in df['title'][idx1] if word not in string.punctuation)
+        titA = titA.replace(' ','')
+        titA = titA.lower()
+
+        titB = ''.join(word for word in df['title'][idx2] if word not in string.punctuation)
+        titB = titB.replace(' ','')
+        titB = titB.lower()
+
+        titSim = jaccard_similarity(titA,titB)
+        candidate_df.loc[i, 'title_similarity'] = titSim
+
+        # 3-gram feature similarity
+        match1 = []
+        match2 = []
+        try:
+            for key in df['features'][idx1].keys():
+                match1.append(df['features'][idx1][key])
+            for key in df['features'][idx2].keys():
+                match2.append(df['features'][idx2][key])
+            str1 = ''      
+            for match in match1:
+                st1 = ''.join(word for word in match if word not in string.punctuation)
+                st1 = st1.replace(' ','')
+                st1 = st1.lower()
+                str1 += st1
+            str2 = ''  
+            for match in match2:
+                st2 = ''.join(word for word in match if word not in string.punctuation)
+                st2 = st2.replace(' ','')
+                st2 = st2.lower()
+                str2 += st2
+            sim_m_kv = jaccard_similarity(str1, str2)    
+        except ZeroDivisionError:
+            sim_m_kv = 0
+        candidate_df.loc[i, 'key_similarity'] = sim_m_kv     
+
+    return candidate_df
+
+def jaccard_similarity(a, b):
+    ''' input: 2 keys (strings), of matching key-value pairs
+        return: 3-gram  jaccard similarity '''
+    N = 3
+    x = {a[i:i+N] for i in range(len(a)-N+1)}
+    y = {b[i:i+N] for i in range(len(b)-N+1)}
+    intersection = x.intersection(y)
+    union = x.union(y)
+    return float(len(intersection)) / len(union)
+
+def logistic_regression(candidates_df):
+    X = candidates_df['signature_similarity','']
+    y = candidates_df['duplicate']
+
 def main():
     print("Loading data...")
     
@@ -424,9 +512,17 @@ def main():
 
     candidate_pairs = list(set(LSH_candidate_pairs) | set(modelID_pairs))
 
-    print("LSH evaluation:")
+    print("Scalability solution evaluation:")
 
-    LSH_evaluation(candidate_pairs,df)
+    #candidate_evaluation(candidate_pairs,df)
+
+    print("Logistic regression...")
+
+    model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
+
+    print(model_df.head())
+
+
     
 if __name__ == "__main__":
     main()
