@@ -264,17 +264,20 @@ def LSH(signature_matrix, thres):
     
     return list(candidates)        
 
-def candidate_evaluation(lsh_candidates, df):
+def candidate_evaluation(candidates, df):
+    '''
+    Computes Pair Quality, Pair Completeness, F1_star, and Fraction of Comparisons given a list of candidate pairs
+    '''
     true_duplicates = all_pairs(df) 
-    lsh_candidates = [set(tuple_a) for tuple_a in lsh_candidates]
-    result = [tuple_a for tuple_a in lsh_candidates if any(set(tuple_a).issubset(set_b) for set_b in true_duplicates)]
+    candidates = [set(tuple_a) for tuple_a in candidates]
+    result = [tuple_a for tuple_a in candidates if any(set(tuple_a).issubset(set_b) for set_b in true_duplicates)]
 
     def generate_2_combinations(input_set):
         return list(itertools.combinations(input_set, 2))
     combinations_list = [generate_2_combinations(set_b) for set_b in true_duplicates]
     flattened_combinations = [combination for sublist in combinations_list for combination in sublist]
 
-    number_comparisons = len(lsh_candidates)
+    number_comparisons = len(candidates)
     true_duplicates_found = len(result)
     true_num_duplicates = len(flattened_combinations)
     possible_comparisons = math.factorial(len(df)) // (2 * math.factorial(len(df) - 2))
@@ -287,6 +290,9 @@ def candidate_evaluation(lsh_candidates, df):
     return [PQ,PC,F1_star,fraction_comparisons]
 
 def all_pairs(df):
+    '''
+    Returns a dictionary of model ID keys, with as values TV indices that have that model ID 
+    '''
     indices_dict = {}
     # Iterate over rows and populate the dictionary
     for index, row in df.iterrows():
@@ -313,6 +319,10 @@ def all_pairs(df):
     return result
     
 def get_modelID(df):
+    '''
+    Returns a list of mostly Model IDs, by filtering the words in the titles by some efficient rules.
+    The list that is returned contains (unique) Model IDs, but is lightly contaminated with other words.
+    '''
     # Unique modelID finder
     # Returns 2 lists with potential modelIDs by extracting words from title and checking how often they occur.
     # First list are values that occur once (bigger probability to contain noise)
@@ -374,7 +384,6 @@ def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
     '''
     Constructs dataframe used for training/testing duplicate detection method.
     Duplicate detection method is trained on LSH output of train set.
-    Missing: multiple similarity measures
     '''
     candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity'])
 
@@ -473,6 +482,9 @@ def jaccard_similarity(a, b):
     return float(len(intersection)) / len(union)
 
 def logistic_regression(df_train, df_test):
+    '''
+    Returns predictive performance of a hyperparameter-optimized logistic regression on the test data, which was trained on the train data.
+    '''
     X_train = df_train[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
     X_test = df_test[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
 
@@ -517,6 +529,7 @@ def main():
     
     print("Min-hashing...")
     
+    #Use 100 hash functions
     signatures = minhash(100,bin_matrix)
     
     print("LSH...")
@@ -540,7 +553,7 @@ def main():
     
     model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
     F1_list = []
-    for bootstrap in range(10):
+    for bootstrap in range(5):
         indices_train, indices_test = train_test_split(model_df.index, test_size=0.37, random_state=42)
         df_train = model_df.loc[indices_train]
         df_test = model_df.loc[indices_test]
