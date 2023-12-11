@@ -94,7 +94,7 @@ def is_model_word(input_string):
 
     return has_letters and has_numbers
 
-def product_representation(titles,TV_brands,features):
+def product_representation(titles,TV_brands):
     '''
     Creates a list of product representations
     Includes model words from the titles, and TV brand names in the title, and model words in the values
@@ -108,12 +108,7 @@ def product_representation(titles,TV_brands,features):
             if is_model_word(string):
                 TV_rep.append(string)
             if string in TV_brands:
-                TV_rep.append(string)
-        for key,val in features[TV].items():
-            val_list = val.split()
-            for word in val_list:
-                if is_model_word(word):
-                    TV_rep.append(word)        
+                TV_rep.append(string)       
         representations.append(TV_rep)
     
     return representations
@@ -262,13 +257,79 @@ def LSH(signature_matrix, thres):
     
     return list(candidates)        
 
-#def similarity(candidate_pairs, bin_matrix):
-#    for pair in candidate_pairs:
-#        TV_1 = bin_matrix[:,pair[0]]
-#        TV_2 = bin_matrix[:,pair[1]]
-#        similarity = np.linalg.norm(TV_1-TV_2)
-#        print(similarity)
+def get_model_df(df,candidate_pairs,signature):
+    '''
+    Constructs dataframe used for training/testing duplicate detection method.
+    Duplicate detection method is trained on LSH output of train set.
+    Missing: multiple similarity measures
+    '''
+    candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'signature_similarity'])
 
+    for i in range(len(candidate_pairs[0])):
+        A = signature[:,int(candidate_pairs[0][i][0])]
+        B = signature[:,int(candidate_pairs[0][i][1])]
+        similarity = jaccard_score(A,B,average='macro')
+        if df['modelID'][candidate_pairs[0][i][0]] == df['modelID'][candidate_pairs[0][i][1]]:
+            candidate_df.loc[i] = [int(1), int(candidate_pairs[0][i][0]), int(candidate_pairs[0][i][1]), similarity]
+        else:
+            candidate_df.loc[i] = [int(0), int(candidate_pairs[0][i][0]), int(candidate_pairs[0][i][1]), similarity]
+
+    return candidate_df
+
+
+def LSH_evaluation(lsh_candidates, df):
+    true_duplicates = all_pairs(df) 
+    lsh_candidates = [set(tuple_a) for tuple_a in lsh_candidates]
+    result = [tuple_a for tuple_a in lsh_candidates if any(set(tuple_a).issubset(set_b) for set_b in true_duplicates)]
+
+    def generate_2_combinations(input_set):
+        return list(itertools.combinations(input_set, 2))
+    combinations_list = [generate_2_combinations(set_b) for set_b in true_duplicates]
+    flattened_combinations = [combination for sublist in combinations_list for combination in sublist]
+
+    number_comparisons = len(lsh_candidates)
+    true_duplicates_found = len(result)
+    true_num_duplicates = len(flattened_combinations)
+
+    PQ = true_duplicates_found / number_comparisons
+    PC = true_duplicates_found / true_num_duplicates
+    F1 = (2*PQ*PC) / (PQ + PC)
+
+    print("Amount of comparisons: ", number_comparisons)
+    print("Amount of true duplicates: ",true_num_duplicates)
+    print("Amount of true duplicates found: ",true_duplicates_found)
+    print('Pair Quality (PQ): ', PQ)
+    print('Pair Completeness (PC): ', PC)
+    print('The F1 score is: ', F1)
+
+    return
+
+def all_pairs(df):
+    indices_dict = {}
+    # Iterate over rows and populate the dictionary
+    for index, row in df.iterrows():
+        model_id = row['modelID']
+        model_id = model_id.lower()
+        model_id = model_id.replace('.','')
+        model_id = model_id.replace('-','')
+        model_id = model_id.replace('(','')
+        model_id = model_id.replace(')','')
+        model_id = model_id.replace('[','')
+        model_id = model_id.replace(']','')
+        model_id = model_id.replace(':','')
+        model_id = model_id.replace('/','')
+        model_id = model_id.replace(',','')
+        model_id = model_id.replace('°','')
+        model_id = model_id.replace('º','')
+        model_id = model_id.replace('>','')
+        model_id = model_id.replace('<','')
+        if model_id in indices_dict:
+            indices_dict[model_id].add(index)
+        else:
+            indices_dict[model_id] = {index}
+    result = [indices for indices in indices_dict.values() if len(indices) > 1]
+    return result
+    
 def main():
     print("Loading data...")
     
@@ -287,16 +348,12 @@ def main():
     
     print("Creating product representations...")
     
-    #Product representations are model words in the title, model words in the values, and brands in the titles
+    #Product representations are model words in the title and brands in the titles
     df['title'] = normalize_list(df['title'])
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
     TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
     TV_brands = normalize_list(list(set(TV_brands_1) | set(TV_brands_2)))
-    df['features'] = df['features'].apply(lambda x: normalize_dictionary(x))
-
-    product_representations = product_representation(df['title'],TV_brands,df['features'])
-
-    #print(product_representations)
+    product_representations = product_representation(df['title'],TV_brands)
 
     print("Creating binary matrix...")
 
@@ -305,12 +362,14 @@ def main():
     print("Min-hashing...")
 
     signatures = minhash(100,bin_matrix)
-
+    
     print("LSH...")
 
-    candidate_pairs = LSH(signatures, 0.8)
+    candidate_pairs = LSH(signatures, 0.9)
 
-    print(candidate_pairs)
+    print("LSH evaluation:")
+
+    LSH_evaluation(candidate_pairs,df)
     
 
 if __name__ == "__main__":
