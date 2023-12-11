@@ -229,10 +229,10 @@ def LSH(signature_matrix, thres):
     rows per band r, and threshold t.
     '''
     # Take nBuckets very large such that columns only hashed to same bucket when identical
-    nBuckets = find_next_prime(100*signature_matrix.shape[0])
-    nBands = get_b(signature_matrix.shape[0],thres)
+    numHashFunc, numTV = signature_matrix.shape    
+    nBuckets = find_next_prime(numTV)
+    nBands = get_b(numHashFunc,thres)
     hash_buckets = initialize_hash_bucket(nBands, nBuckets)
-    numHashFunc, numTV = signature_matrix.shape
     candidates = set()
     rowsPerBand = math.floor(numHashFunc/nBands)
     rowsLeft = numHashFunc % nBands
@@ -249,7 +249,8 @@ def LSH(signature_matrix, thres):
         for col in range(numTV):
             key = int(hash_function.dot(band[:,col]) % nBuckets)
             hash_buckets[b][key].append(col)
-
+        
+        print(hash_buckets[b])
         #for band b, check each bucket for duplicates
         for bucket in hash_buckets[b]:
             if len(bucket) > 1:
@@ -529,12 +530,11 @@ def main():
     
     print("Min-hashing...")
     
-    #Use 100 hash functions
-    signatures = minhash(100,bin_matrix)
+    signatures = minhash(10,bin_matrix)
     
     print("LSH...")
     
-    threshold = 0.9
+    threshold = 0.5
     LSH_candidate_pairs = LSH(signatures, threshold)
     
     print("Adding title model ID candidate pairs...")
