@@ -282,14 +282,7 @@ def candidate_evaluation(lsh_candidates, df):
     PC = true_duplicates_found / true_num_duplicates
     F1_star = (2*PQ*PC) / (PQ + PC)
 
-    print("Amount of comparisons: ", number_comparisons)
-    print("Amount of true duplicates: ",true_num_duplicates)
-    print("Amount of true duplicates found: ",true_duplicates_found)
-    print('Pair Quality (PQ): ', PQ)
-    print('Pair Completeness (PC): ', PC)
-    print('The F1_star score is: ', F1_star)
-
-    return
+    return [PQ,PC,F1_star]
 
 def all_pairs(df):
     indices_dict = {}
@@ -477,26 +470,26 @@ def jaccard_similarity(a, b):
     union = x.union(y)
     return float(len(intersection)) / len(union)
 
-def logistic_regression(candidates_df, train_perc):
-    X = candidates_df[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
-    
+def logistic_regression(df_train, df_test):
+    X_train = df_train[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
+    X_test = df_test[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
+
     label_encoder = LabelEncoder()
-    candidates_df['duplicate'] = label_encoder.fit_transform(candidates_df['duplicate'])
-    y = candidates_df['duplicate']
+    df_train['duplicate'] = label_encoder.fit_transform(df_train['duplicate'])
+    df_test['duplicate'] = label_encoder.fit_transform(df_test['duplicate'])
+    y_train = df_train['duplicate']
+    y_test = df_test['duplicate']
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 1 - train_perc)
-    model = LogisticRegression(random_state=0)
-    
+    model = LogisticRegression(random_state=0)    
     param_grid_lr = {'C': np.logspace(-3, 3, 7)}
     grid_lr = GridSearchCV(model, param_grid_lr, cv=3)
     fitgrid_lr = grid_lr.fit(X_train, y_train)
-    
     y_pred = fitgrid_lr.predict(X_test)
     
     f1 = f1_score(y_test, y_pred)
     conf_matrix = confusion_matrix(y_test, y_pred)
 
-    return f1, conf_matrix, fitgrid_lr.best_estimator_.coef_, ['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']
+    return f1, conf_matrix
 
 def main():
     print("Loading data...")
@@ -513,40 +506,47 @@ def main():
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
     TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
     TV_brands = normalize_list(list(set(TV_brands_1) | set(TV_brands_2)))
+
     product_representations = product_representation(df['title'],TV_brands)
-
+    
     print("Creating binary matrix...")
-
+    
     bin_matrix, tokens = binary_matrix(product_representations)
     
     print("Min-hashing...")
-
+    
     signatures = minhash(100,bin_matrix)
     
     print("LSH...")
-
-    LSH_candidate_pairs = LSH(signatures, 0.8)
-
+    
+    threshold = 0.8
+    LSH_candidate_pairs = LSH(signatures, threshold)
+    
     print("Adding title model ID candidate pairs...")
-
+    
     title_modelIDs = get_modelID(df)
     modelID_pairs = get_title_modelID_pairs(title_modelIDs,df)
-
     candidate_pairs = list(set(LSH_candidate_pairs) | set(modelID_pairs))
-
+    
     print("Scalability solution evaluation:")
-
-    candidate_evaluation(candidate_pairs,df)
+    
+    performance = candidate_evaluation(candidate_pairs,df)
+    print("Scalability performance at threshold: ",threshold)
+    print(f"PQ, PC, F1_star:{performance}")
 
     print("Logistic regression...")
-
-    model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
     
-    F1, confusion, coef, X = logistic_regression(model_df, 0.63)
-    print(f"Confusion Matrix:\n{confusion}")
-    print(f"F1: {F1}")
-    print(f"features: {X}")
-    print(f"Coefficients: {coef}")
+    model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
+    F1_list = []
+    for bootstrap in range(10):
+        indices_train, indices_test = train_test_split(model_df.index, test_size=0.37, random_state=42)
+        df_train = model_df.loc[indices_train]
+        df_test = model_df.loc[indices_test]
+
+        F1, confusion = logistic_regression(df_train, df_test)
+        F1_list.append(F1)
+
+    print("Average F1 score duplicate detection: ", sum(F1_list)/len(F1_list))
 
     
 if __name__ == "__main__":
