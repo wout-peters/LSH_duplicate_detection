@@ -277,12 +277,14 @@ def candidate_evaluation(lsh_candidates, df):
     number_comparisons = len(lsh_candidates)
     true_duplicates_found = len(result)
     true_num_duplicates = len(flattened_combinations)
+    possible_comparisons = math.factorial(len(df)) // (2 * math.factorial(len(df) - 2))
 
     PQ = true_duplicates_found / number_comparisons
     PC = true_duplicates_found / true_num_duplicates
     F1_star = (2*PQ*PC) / (PQ + PC)
+    fraction_comparisons = number_comparisons / possible_comparisons
 
-    return [PQ,PC,F1_star]
+    return [PQ,PC,F1_star,fraction_comparisons]
 
 def all_pairs(df):
     indices_dict = {}
@@ -519,7 +521,7 @@ def main():
     
     print("LSH...")
     
-    threshold = 0.8
+    threshold = 0.9
     LSH_candidate_pairs = LSH(signatures, threshold)
     
     print("Adding title model ID candidate pairs...")
@@ -532,7 +534,7 @@ def main():
     
     performance = candidate_evaluation(candidate_pairs,df)
     print("Scalability performance at threshold: ",threshold)
-    print(f"PQ, PC, F1_star:{performance}")
+    print(f"PQ, PC, F1_star, Fraction of Comparisons:{performance}")
 
     print("Logistic regression...")
     
