@@ -11,6 +11,11 @@ import string
 import re
 import itertools
 from sklearn.metrics import jaccard_score
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, f1_score, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+
 
 def create_df(data):
     '''
@@ -376,9 +381,9 @@ def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
     Duplicate detection method is trained on LSH output of train set.
     Missing: multiple similarity measures
     '''
-    candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'same_shop', 'same_brand' 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity'])
+    candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity'])
 
-    for i in range(len(candidate_pairs[0])):
+    for i in range(len(candidate_pairs)):
         # Indices
         idx1 = int(candidate_pairs[i][0])
         idx2 = int(candidate_pairs[i][1])
@@ -398,7 +403,7 @@ def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
             candidate_df.loc[i, 'duplicate'] = 0
         
         # Check if model ID pairs
-        if (idx1,idx2) in modelID_pairs:
+        if (idx1,idx2) or (idx2,idx1) in modelID_pairs:
             candidate_df.loc[i, 'modelID_pair'] = 1
         else:
             candidate_df.loc[i, 'modelID_pair'] = 0
@@ -472,9 +477,26 @@ def jaccard_similarity(a, b):
     union = x.union(y)
     return float(len(intersection)) / len(union)
 
-def logistic_regression(candidates_df):
-    X = candidates_df['signature_similarity','']
+def logistic_regression(candidates_df, train_perc):
+    X = candidates_df[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
+    
+    label_encoder = LabelEncoder()
+    candidates_df['duplicate'] = label_encoder.fit_transform(candidates_df['duplicate'])
     y = candidates_df['duplicate']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 1 - train_perc)
+    model = LogisticRegression(random_state=0)
+    
+    param_grid_lr = {'C': np.logspace(-3, 3, 7)}
+    grid_lr = GridSearchCV(model, param_grid_lr, cv=3)
+    fitgrid_lr = grid_lr.fit(X_train, y_train)
+    
+    y_pred = fitgrid_lr.predict(X_test)
+    
+    f1 = f1_score(y_test, y_pred)
+    conf_matrix = confusion_matrix(y_test, y_pred)
+
+    return f1, conf_matrix, fitgrid_lr.best_estimator_.coef_, ['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']
 
 def main():
     print("Loading data...")
@@ -503,7 +525,7 @@ def main():
     
     print("LSH...")
 
-    LSH_candidate_pairs = LSH(signatures, 0.9)
+    LSH_candidate_pairs = LSH(signatures, 0.8)
 
     print("Adding title model ID candidate pairs...")
 
@@ -514,14 +536,17 @@ def main():
 
     print("Scalability solution evaluation:")
 
-    #candidate_evaluation(candidate_pairs,df)
+    candidate_evaluation(candidate_pairs,df)
 
     print("Logistic regression...")
 
     model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
-
-    print(model_df.head())
-
+    
+    F1, confusion, coef, X = logistic_regression(model_df, 0.63)
+    print(f"Confusion Matrix:\n{confusion}")
+    print(f"F1: {F1}")
+    print(f"features: {X}")
+    print(f"Coefficients: {coef}")
 
     
 if __name__ == "__main__":
