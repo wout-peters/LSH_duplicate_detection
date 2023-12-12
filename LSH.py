@@ -172,7 +172,7 @@ def minhash(numHashFunc, binary_matrix):
     the number of tokens
     '''
     #Create numHashFunc random (and unique) hash functions
-    P = find_next_prime(binary_matrix.shape[0])
+    P = find_next_prime(10*binary_matrix.shape[1])
     a = randomCoefficients(numHashFunc)
     b = randomCoefficients(numHashFunc)
     hashFunc = lambda a,b,P,x: (a * x + b) % P
@@ -233,7 +233,7 @@ def LSH(signature_matrix, thres):
     '''
     # Take nBuckets very large such that columns only hashed to same bucket when identical
     numHashFunc, numTV = signature_matrix.shape    
-    nBuckets = find_next_prime(numTV)
+    nBuckets = find_next_prime(100*numTV)
     nBands = get_b(numHashFunc,thres)
     hash_buckets = initialize_hash_bucket(nBands, nBuckets)
     candidates = set()
@@ -378,43 +378,49 @@ def get_title_modelID_pairs(modelID_list, df):
 
     return title_modelID_pairs
 
-def get_model_df(df,candidate_pairs,signature,title_modelIDs,TV_brands):
+def get_model_df(df,sig_idx_candidate_pairs,df_idx_candidate_pairs,signature,title_modelIDs,TV_brands):
     '''
     Constructs dataframe used for training/testing duplicate detection method.
     Duplicate detection method is trained on LSH output of train set.
     '''
     candidate_df = pd.DataFrame(columns = ['duplicate', 'idx_tv1', 'idx_tv2', 'same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity'])
 
-    for i in range(len(candidate_pairs)):
+    for i in range(len(df_idx_candidate_pairs)):
         # Indices
-        idx1 = int(candidate_pairs[i][0])
-        idx2 = int(candidate_pairs[i][1])
-        candidate_df.loc[i, 'idx_tv1'] = idx1
-        candidate_df.loc[i, 'idx_tv2'] = idx2   
+        df_idx1 = int(df_idx_candidate_pairs[i][0])
+        df_idx2 = int(df_idx_candidate_pairs[i][1])
+        sig_idx1 = int(sig_idx_candidate_pairs[i][0])
+        sig_idx2 = int(sig_idx_candidate_pairs[i][1])
+        candidate_df.loc[i, 'idx_tv1'] = df_idx1
+        candidate_df.loc[i, 'idx_tv2'] = df_idx2   
         
         # Signature similarity
-        A = signature[:,idx1]
-        B = signature[:,idx2]
+        A = signature[:,sig_idx1]
+        B = signature[:,sig_idx2]
         similarity = jaccard_score(A,B,average='macro')
         candidate_df.loc[i, 'signature_similarity'] = similarity
 
         # True duplicate
-        if df['modelID'][idx1] == df['modelID'][idx2]:
+        if df['modelID'][df_idx1] == df['modelID'][df_idx2]:
             candidate_df.loc[i, 'duplicate'] = 1
         else:
             candidate_df.loc[i, 'duplicate'] = 0
         
         # Check if model ID pairs
         candidate_df.loc[i, 'modelID_pair'] = 0
-        for word in df['title'][idx1]:
+        modelid1 = ''
+        modelid2 = ''
+        for word in df['title'][df_idx1].split():
             if word in title_modelIDs:
-                candidate_df.loc[i, 'modelID_pair'] += 1
-        for word in df['title'][idx2]:
+                modelid1 = word
+        for word in df['title'][df_idx2].split():
             if word in title_modelIDs:
-                candidate_df.loc[i, 'modelID_pair'] += 1
+                modelid2 = word
+        if modelid1 == modelid2 and len(modelid1) > 0:
+            candidate_df.loc[i, 'modelID_pair'] = 1
 
         # Same store
-        if df['shop'][idx1] == df['shop'][idx2]:
+        if df['shop'][df_idx1] == df['shop'][df_idx2]:
             candidate_df.loc[i, 'same_shop'] = 1
         else:
             candidate_df.loc[i, 'same_shop'] = 0
@@ -422,23 +428,23 @@ def get_model_df(df,candidate_pairs,signature,title_modelIDs,TV_brands):
         # Same brand
         brand1 = ''
         brand2 = ''
-        for word1 in df['title'][idx1].split():
+        for word1 in df['title'][df_idx1].split():
             if word1 in TV_brands:
                 brand1 = word1
-        for word2 in df['title'][idx2].split():
+        for word2 in df['title'][df_idx2].split():
             if word2 in TV_brands:
                 brand2 = word2
-        if brand1 == brand2:
+        if brand1 == brand2 and len(brand1) > 0:
             candidate_df.loc[i, 'same_brand'] = 1
         else:
             candidate_df.loc[i, 'same_brand'] = 0
 
         # 3-gram title similarity
-        titA = ''.join(word for word in df['title'][idx1] if word not in string.punctuation)
+        titA = ''.join(word for word in df['title'][df_idx1] if word not in string.punctuation)
         titA = titA.replace(' ','')
         titA = titA.lower()
 
-        titB = ''.join(word for word in df['title'][idx2] if word not in string.punctuation)
+        titB = ''.join(word for word in df['title'][df_idx2] if word not in string.punctuation)
         titB = titB.replace(' ','')
         titB = titB.lower()
 
@@ -486,8 +492,8 @@ def logistic_regression(df_train, df_test):
     '''
     Returns predictive performance of a hyperparameter-optimized logistic regression on the test data, which was trained on the train data.
     '''
-    X_train = df_train[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
-    X_test = df_test[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity', 'key_similarity']]
+    X_train = df_train[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity']]
+    X_test = df_test[['same_shop', 'same_brand', 'modelID_pair', 'signature_similarity', 'title_similarity']]
 
     label_encoder = LabelEncoder()
     df_train['duplicate'] = label_encoder.fit_transform(df_train['duplicate'])
@@ -539,7 +545,9 @@ def main():
     df = get_data()
     performance_df = pd.DataFrame(columns = ['threshold', 'PQ', 'PC', 'F1_star', 'Fraction_of_comparisons', 'F1'])
     i = 0
-    for t in np.arange(1.0, 0.0, -1):
+    num_hash_functions = 100
+    nBootstraps = 1
+    for t in np.arange(1, 0.8, -0.1):
         print(f"Threshold value:", t)
         tic = time.perf_counter()
         PQ = 0
@@ -547,11 +555,10 @@ def main():
         F1_star = 0
         Fraction_of_comparisons = 0
         F1 = 0
-        for bootstrap in range(5):
+        for bootstrap in range(nBootstraps):
             indices_train, indices_test = train_test_split(df.index, test_size=0.37, random_state=42)
-            train_candidates, train_signatures, train_title_modelIDs, TV_brands = run_LSH(t, 100, df.loc[indices_train])
-            test_candidates, test_signatures, test_title_modelIDs, TV_brands = run_LSH(t, 100, df.loc[indices_test])
-            print(len(train_candidates))
+            train_candidates, train_signatures, train_title_modelIDs, TV_brands = run_LSH(t, num_hash_functions, df.loc[indices_train])
+            test_candidates, test_signatures, test_title_modelIDs, TV_brands = run_LSH(t, num_hash_functions, df.loc[indices_test])
             #Performance: PQ, PC, F1_star, Fraction of Comparisons
             df_idx_train_candidates = get_index(train_candidates, indices_train)
             df_idx_test_candidates = get_index(test_candidates, indices_test)
@@ -561,24 +568,28 @@ def main():
             F1_star += LSH_performance[2]
             Fraction_of_comparisons += LSH_performance[3]
             #Logistic regression: 
-            train_df = get_model_df(df.loc[indices_train], df_idx_train_candidates, train_signatures, train_title_modelIDs, TV_brands)
-            test_df = get_model_df(df.loc[indices_test], df_idx_test_candidates, test_signatures, test_title_modelIDs, TV_brands)
+            ticc = time.perf_counter()
+            train_df = get_model_df(df.loc[indices_train], train_candidates, df_idx_train_candidates, train_signatures, train_title_modelIDs, TV_brands)
+            test_df = get_model_df(df.loc[indices_test], test_candidates, df_idx_test_candidates, test_signatures, test_title_modelIDs, TV_brands)
+            tocc = time.perf_counter()
+            print(f"Elapsed time for getting test/train df is {tocc - ticc:0.4f} seconds")
             F1_, confusion = logistic_regression(train_df, test_df)
             F1 += F1_
         performance_df.loc[i, 'threshold'] = t
-        performance_df.loc[i, 'PQ'] = PQ/5
-        performance_df.loc[i, 'PC'] = PC/5
-        performance_df.loc[i, 'F1_star'] = F1_star/5
-        performance_df.loc[i, 'Fraction_of_comparisons'] = Fraction_of_comparisons/5
-        performance_df.loc[i, 'F1'] = F1/5
+        performance_df.loc[i, 'PQ'] = PQ/nBootstraps
+        performance_df.loc[i, 'PC'] = PC/nBootstraps
+        performance_df.loc[i, 'F1_star'] = F1_star/nBootstraps
+        performance_df.loc[i, 'Fraction_of_comparisons'] = Fraction_of_comparisons/nBootstraps
+        performance_df.loc[i, 'F1'] = F1/nBootstraps
         toc = time.perf_counter()
         print(f"Elapsed time at threshold {t} is {toc - tic:0.4f} seconds")
         i += 1
     
     print(performance_df)
-    csv_file_path = '"C:\\Users\\Wout Peters\\Documents"'        
-    df.to_csv(csv_file_path, index = False)
-
+    csv_file_path = "C:\\Users\\Wout Peters\\Documents\\output.csv"
+    original_file_path = "C:\\Users\\Wout Peters\\Documents\\data.csv"
+    performance_df.to_csv(csv_file_path, index = False)
+    df.to_csv(original_file_path)
     
 if __name__ == "__main__":
     main()
