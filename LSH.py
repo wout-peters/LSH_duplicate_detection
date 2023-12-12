@@ -15,6 +15,7 @@ from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, f1_score, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
+import time
 
 
 def create_df(data):
@@ -101,21 +102,23 @@ def is_model_word(input_string):
 
     return has_letters and has_numbers
 
-def product_representation(titles,TV_brands):
+def product_representation(df,TV_brands,modelIDs):
     '''
     Creates a list of product representations
     Includes model words from the titles, and TV brand names in the title, and model words in the values
     '''
     representations = []
 
-    for TV in range(len(titles)):
+    for TV, row in df.iterrows():
         TV_rep = []
-        title_list = titles[TV].split()
+        title_list = df['title'][TV].split()
         for string in title_list:
             if is_model_word(string):
                 TV_rep.append(string)
             if string in TV_brands:
                 TV_rep.append(string)       
+            if string in modelIDs:
+                TV_rep.append(string)
         representations.append(TV_rep)
     
     return representations
@@ -249,18 +252,17 @@ def LSH(signature_matrix, thres):
         for col in range(numTV):
             key = int(hash_function.dot(band[:,col]) % nBuckets)
             hash_buckets[b][key].append(col)
-        
-        print(hash_buckets[b])
+
         #for band b, check each bucket for duplicates
         for bucket in hash_buckets[b]:
             if len(bucket) > 1:
                 for pair in itertools.combinations(bucket, 2):
                     if pair not in candidates:
-                        A = signature_matrix[:,pair[0]]
-                        B = signature_matrix[:,pair[1]]
-                        similarity = jaccard_score(A,B,average='macro')
+                        #A = signature_matrix[:,pair[0]]
+                        #B = signature_matrix[:,pair[1]]
+                        #similarity = jaccard_score(A,B,average='macro')
                         #if similarity > thres, add to candidates  
-                        if similarity >= thres:
+                        #if similarity >= thres:
                             candidates.add(pair)            
     
     return list(candidates)        
@@ -324,16 +326,10 @@ def get_modelID(df):
     Returns a list of mostly Model IDs, by filtering the words in the titles by some efficient rules.
     The list that is returned contains (unique) Model IDs, but is lightly contaminated with other words.
     '''
-    # Unique modelID finder
-    # Returns 2 lists with potential modelIDs by extracting words from title and checking how often they occur.
-    # First list are values that occur once (bigger probability to contain noise)
-    # Second list contains values that occur 2,3,4,5 times (quite low noise)
-
-    # Add all titles togheter and split the title list into words
     modelID_set = set()
-    for i in range(len(df['title'])):
+    for i, row in df.iterrows():
         title_split = df['title'][i].split()
-        title_split_unique = set(title_split)             # in case modelID occurs 2 times in title
+        title_split_unique = set(title_split)
 
         # First time filter
         def filter_words(word_list):
@@ -355,11 +351,12 @@ def get_modelID(df):
         result_string = re.sub(r'\b3d\b', '', single_string).strip()
 
         if len(result_string) >= 1 :
-            modelID_set.add(result_string)
+            split = result_string.split()
+            modelID_set.update(split)
         else:
             modelID_set.add(f'{i}')
 
-    return {entry for entry in modelID_set if not entry.isnumeric()}
+    return list({entry for entry in modelID_set if not entry.isnumeric()})
     
 def get_title_modelID_pairs(modelID_list, df):
     modelID_indices = {}
@@ -381,7 +378,7 @@ def get_title_modelID_pairs(modelID_list, df):
 
     return title_modelID_pairs
 
-def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
+def get_model_df(df,candidate_pairs,signature,title_modelIDs,TV_brands):
     '''
     Constructs dataframe used for training/testing duplicate detection method.
     Duplicate detection method is trained on LSH output of train set.
@@ -408,10 +405,13 @@ def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
             candidate_df.loc[i, 'duplicate'] = 0
         
         # Check if model ID pairs
-        if (idx1,idx2) or (idx2,idx1) in modelID_pairs:
-            candidate_df.loc[i, 'modelID_pair'] = 1
-        else:
-            candidate_df.loc[i, 'modelID_pair'] = 0
+        candidate_df.loc[i, 'modelID_pair'] = 0
+        for word in df['title'][idx1]:
+            if word in title_modelIDs:
+                candidate_df.loc[i, 'modelID_pair'] += 1
+        for word in df['title'][idx2]:
+            if word in title_modelIDs:
+                candidate_df.loc[i, 'modelID_pair'] += 1
 
         # Same store
         if df['shop'][idx1] == df['shop'][idx2]:
@@ -446,29 +446,29 @@ def get_model_df(df,candidate_pairs,signature,modelID_pairs,TV_brands):
         candidate_df.loc[i, 'title_similarity'] = titSim
 
         # 3-gram feature similarity
-        match1 = []
-        match2 = []
-        try:
-            for key in df['features'][idx1].keys():
-                match1.append(df['features'][idx1][key])
-            for key in df['features'][idx2].keys():
-                match2.append(df['features'][idx2][key])
-            str1 = ''      
-            for match in match1:
-                st1 = ''.join(word for word in match if word not in string.punctuation)
-                st1 = st1.replace(' ','')
-                st1 = st1.lower()
-                str1 += st1
-            str2 = ''  
-            for match in match2:
-                st2 = ''.join(word for word in match if word not in string.punctuation)
-                st2 = st2.replace(' ','')
-                st2 = st2.lower()
-                str2 += st2
-            sim_m_kv = jaccard_similarity(str1, str2)    
-        except ZeroDivisionError:
-            sim_m_kv = 0
-        candidate_df.loc[i, 'key_similarity'] = sim_m_kv     
+        #match1 = []
+        #match2 = []
+        #try:
+        #    for key in df['features'][idx1].keys():
+        #        match1.append(df['features'][idx1][key])
+        #    for key in df['features'][idx2].keys():
+        #        match2.append(df['features'][idx2][key])
+        #    str1 = ''      
+        #    for match in match1:
+        #        st1 = ''.join(word for word in match if word not in string.punctuation)
+        #        st1 = st1.replace(' ','')
+        #        st1 = st1.lower()
+        #        str1 += st1
+        #    str2 = ''  
+        #    for match in match2:
+        #        st2 = ''.join(word for word in match if word not in string.punctuation)
+        #        st2 = st2.replace(' ','')
+        #        st2 = st2.lower()
+        #        str2 += st2
+        #    sim_m_kv = jaccard_similarity(str1, str2)    
+        #except ZeroDivisionError:
+        #    sim_m_kv = 0
+        #candidate_df.loc[i, 'key_similarity'] = sim_m_kv     
 
     return candidate_df
 
@@ -506,62 +506,78 @@ def logistic_regression(df_train, df_test):
 
     return f1, conf_matrix
 
-def main():
-    print("Loading data...")
-    
+def run_LSH(threshold,num_hash_func,df):
+    TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
+    TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
+    TV_brands = normalize_list(list(set(TV_brands_1) | set(TV_brands_2)))
+    title_modelIDs = normalize_list(get_modelID(df))
+
+    product_representations = product_representation(df,TV_brands,title_modelIDs)
+    bin_matrix, tokens = binary_matrix(product_representations)
+    signatures = minhash(num_hash_func,bin_matrix)
+    LSH_candidate_pairs = LSH(signatures, threshold)
+    return LSH_candidate_pairs, signatures, title_modelIDs, TV_brands
+
+def get_data():
     with open("D:/Studie/23-24/Blok 2/Computer Science/Personal Assignment/TVs-all-merged (1)/TVs-all-merged.json", 'r') as read_file:
         data = json.load(read_file)
     read_file.close()
     df = create_df(data)
-    
-    print("Creating product representations...")
-    
-    #Product representations are model words in the title and brands in the titles
     df['title'] = normalize_list(df['title'])
-    TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
-    TV_brands_2 = ['Philips', 'Samsung', 'Sharp', 'Toshiba', 'Hisense', 'Sony', 'LG', 'RCA', 'Panasonic', 'VIZIO', 'Naxa', 'Coby', 'Vizio', 'Avue', 'Insignia', 'SunBriteTV', 'Magnavox', 'Sanyo', 'JVC', 'Haier', 'Venturer', 'Westinghouse', 'Sansui', 'Pyle', 'NEC', 'Sceptre', 'ViewSonic', 'Mitsubishi', 'SuperSonic', 'Curtisyoung', 'Vizio', 'TCL', 'Sansui', 'Seiki', 'Dynex']
-    TV_brands = normalize_list(list(set(TV_brands_1) | set(TV_brands_2)))
+    return df
 
-    product_representations = product_representation(df['title'],TV_brands)
-    
-    print("Creating binary matrix...")
-    
-    bin_matrix, tokens = binary_matrix(product_representations)
-    
-    print("Min-hashing...")
-    
-    signatures = minhash(10,bin_matrix)
-    
-    print("LSH...")
-    
-    threshold = 0.5
-    LSH_candidate_pairs = LSH(signatures, threshold)
-    
-    print("Adding title model ID candidate pairs...")
-    
-    title_modelIDs = get_modelID(df)
-    modelID_pairs = get_title_modelID_pairs(title_modelIDs,df)
-    candidate_pairs = list(set(LSH_candidate_pairs) | set(modelID_pairs))
-    
-    print("Scalability solution evaluation:")
-    
-    performance = candidate_evaluation(candidate_pairs,df)
-    print("Scalability performance at threshold: ",threshold)
-    print(f"PQ, PC, F1_star, Fraction of Comparisons:{performance}")
+def get_index(cand, indices):
+    new_candidates = []
+    for pair in cand:
+        new_pair = []
+        new_pair.append(indices[pair[0]])
+        new_pair.append(indices[pair[1]])
+        new_candidates.append(new_pair)
+    return new_candidates
 
-    print("Logistic regression...")
+def main():
+    df = get_data()
+    performance_df = pd.DataFrame(columns = ['threshold', 'PQ', 'PC', 'F1_star', 'Fraction_of_comparisons', 'F1'])
+    i = 0
+    for t in np.arange(1.0, 0.0, -1):
+        print(f"Threshold value:", t)
+        tic = time.perf_counter()
+        PQ = 0
+        PC = 0
+        F1_star = 0
+        Fraction_of_comparisons = 0
+        F1 = 0
+        for bootstrap in range(5):
+            indices_train, indices_test = train_test_split(df.index, test_size=0.37, random_state=42)
+            train_candidates, train_signatures, train_title_modelIDs, TV_brands = run_LSH(t, 100, df.loc[indices_train])
+            test_candidates, test_signatures, test_title_modelIDs, TV_brands = run_LSH(t, 100, df.loc[indices_test])
+            print(len(train_candidates))
+            #Performance: PQ, PC, F1_star, Fraction of Comparisons
+            df_idx_train_candidates = get_index(train_candidates, indices_train)
+            df_idx_test_candidates = get_index(test_candidates, indices_test)
+            LSH_performance = candidate_evaluation(df_idx_test_candidates, df.loc[indices_test])
+            PQ += LSH_performance[0]
+            PC += LSH_performance[1]
+            F1_star += LSH_performance[2]
+            Fraction_of_comparisons += LSH_performance[3]
+            #Logistic regression: 
+            train_df = get_model_df(df.loc[indices_train], df_idx_train_candidates, train_signatures, train_title_modelIDs, TV_brands)
+            test_df = get_model_df(df.loc[indices_test], df_idx_test_candidates, test_signatures, test_title_modelIDs, TV_brands)
+            F1_, confusion = logistic_regression(train_df, test_df)
+            F1 += F1_
+        performance_df.loc[i, 'threshold'] = t
+        performance_df.loc[i, 'PQ'] = PQ/5
+        performance_df.loc[i, 'PC'] = PC/5
+        performance_df.loc[i, 'F1_star'] = F1_star/5
+        performance_df.loc[i, 'Fraction_of_comparisons'] = Fraction_of_comparisons/5
+        performance_df.loc[i, 'F1'] = F1/5
+        toc = time.perf_counter()
+        print(f"Elapsed time at threshold {t} is {toc - tic:0.4f} seconds")
+        i += 1
     
-    model_df = get_model_df(df, candidate_pairs, signatures, modelID_pairs, TV_brands)
-    F1_list = []
-    for bootstrap in range(5):
-        indices_train, indices_test = train_test_split(model_df.index, test_size=0.37, random_state=42)
-        df_train = model_df.loc[indices_train]
-        df_test = model_df.loc[indices_test]
-
-        F1, confusion = logistic_regression(df_train, df_test)
-        F1_list.append(F1)
-
-    print("Average F1 score duplicate detection: ", sum(F1_list)/len(F1_list))
+    print(performance_df)
+    csv_file_path = '"C:\\Users\\Wout Peters\\Documents"'        
+    df.to_csv(csv_file_path, index = False)
 
     
 if __name__ == "__main__":
