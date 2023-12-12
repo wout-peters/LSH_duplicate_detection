@@ -284,13 +284,15 @@ def candidate_evaluation(candidates, df):
     true_duplicates_found = len(result)
     true_num_duplicates = len(flattened_combinations)
     possible_comparisons = math.factorial(len(df)) // (2 * math.factorial(len(df) - 2))
+    false_negatives = true_num_duplicates - true_duplicates_found
+    true_negatives = possible_comparisons - number_comparisons - false_negatives
 
     PQ = true_duplicates_found / number_comparisons
     PC = true_duplicates_found / true_num_duplicates
     F1_star = (2*PQ*PC) / (PQ + PC)
     fraction_comparisons = number_comparisons / possible_comparisons
 
-    return [PQ,PC,F1_star,fraction_comparisons]
+    return [PQ,PC,F1_star,fraction_comparisons,false_negatives,true_negatives]
 
 def all_pairs(df):
     '''
@@ -488,7 +490,7 @@ def jaccard_similarity(a, b):
     union = x.union(y)
     return float(len(intersection)) / len(union)
 
-def logistic_regression(df_train, df_test):
+def logistic_regression(df_train, df_test, false_neg, true_neg):
     '''
     Returns predictive performance of a hyperparameter-optimized logistic regression on the test data, which was trained on the train data.
     '''
@@ -507,10 +509,15 @@ def logistic_regression(df_train, df_test):
     fitgrid_lr = grid_lr.fit(X_train, y_train)
     y_pred = fitgrid_lr.predict(X_test)
     
-    f1 = f1_score(y_test, y_pred)
-    conf_matrix = confusion_matrix(y_test, y_pred)
+    #f1 = f1_score(y_test, y_pred)
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+    tn += true_neg
+    fn += false_neg
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    f1 = (2*precision*recall)/(precision + recall)
 
-    return f1, conf_matrix
+    return f1
 
 def run_LSH(threshold,num_hash_func,df):
     TV_brands_1 = ["Bang & Olufsen","Continental Edison","Denver","Edenwood","Grundig","Haier","Hisense","Hitachi","HKC","Huawei","Insignia","JVC","LeEco","LG","Loewe","Medion","Metz","Motorola","OK.","OnePlus","Panasonic","Philips","RCA","Samsung","Sceptre","Sharp","Skyworth","Sony","TCL","Telefunken","Thomson","Toshiba","Vestel","Vizio","Xiaomi","Nokia","Engel","Nevir","TD Systems","Hyundai","Strong","Realme","Oppo","Metz Blue","Asus","Amazon","Cecotec","Nilait","Daewoo","insignia","nec","supersonic","viewsonic","Element","Sylvania","Proscan","Onn","Vankyo","Blaupunkt","Coby","Kogan","RCA","Polaroid","Westinghouse","Seiki","Insignia","Funai","Sansui","Dynex","naxa"]
@@ -545,9 +552,9 @@ def main():
     df = get_data()
     performance_df = pd.DataFrame(columns = ['threshold', 'PQ', 'PC', 'F1_star', 'Fraction_of_comparisons', 'F1'])
     i = 0
-    num_hash_functions = 100
-    nBootstraps = 1
-    for t in np.arange(1, 0.8, -0.1):
+    num_hash_functions = 50
+    nBootstraps = 5
+    for t in np.arange(1, 0.0, -0.05):
         print(f"Threshold value:", t)
         tic = time.perf_counter()
         PQ = 0
@@ -567,13 +574,15 @@ def main():
             PC += LSH_performance[1]
             F1_star += LSH_performance[2]
             Fraction_of_comparisons += LSH_performance[3]
+            false_negatives = LSH_performance[4]
+            true_negatives = LSH_performance[5]
             #Logistic regression: 
             ticc = time.perf_counter()
             train_df = get_model_df(df.loc[indices_train], train_candidates, df_idx_train_candidates, train_signatures, train_title_modelIDs, TV_brands)
             test_df = get_model_df(df.loc[indices_test], test_candidates, df_idx_test_candidates, test_signatures, test_title_modelIDs, TV_brands)
             tocc = time.perf_counter()
             print(f"Elapsed time for getting test/train df is {tocc - ticc:0.4f} seconds")
-            F1_, confusion = logistic_regression(train_df, test_df)
+            F1_ = logistic_regression(train_df, test_df, false_negatives, true_negatives)
             F1 += F1_
         performance_df.loc[i, 'threshold'] = t
         performance_df.loc[i, 'PQ'] = PQ/nBootstraps
